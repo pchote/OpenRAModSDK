@@ -1,0 +1,21 @@
+#!/bin/sh
+cd "/app/lib/openra"
+
+cert-sync --user --quiet /etc/ssl/certs/ca-certificates.crt
+
+CONTAINER=$(/usr/bin/flatpak info net.openra.{MODINSTALLERNAME} | grep 'Location:' | cut -d' ' -f2)"/metadata"
+echo $CONTAINER
+
+mono --debug OpenRA.Game.exe Game.Mod={MODID} Engine.LaunchPath="/usr/bin/flatpak" Engine.LaunchArgs="run net.openra.{MODINSTALLERNAME}" Engine.TestPath="$CONTAINER" "$@"
+
+# Show a crash dialog if required
+if [ $? != 0 ] && [ $? != 1 ]
+then
+	if which zenity > /dev/null
+	then
+		zenity --question --title "{MODNAME}" --text "{MODNAME} has encountered a fatal error.\nLog Files are available in ~/.openra." --ok-label "Quit" --cancel-label "View FAQ" || xdg-open "{MODFAQURL}"
+	else
+		printf "{MODNAME} has encountered a fatal error.\n  -> Log Files are available in ~/.openra\n  -> FAQ is available at {MODFAQURL}\n"
+	fi
+	exit 1
+fi

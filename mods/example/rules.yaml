@@ -21,3 +21,7 @@ Player:
 	DeveloperMode:
 	Shroud:
 	FrozenActorLayer:
+
+Dummy:
+	AlwaysVisible:
+	HitShape:

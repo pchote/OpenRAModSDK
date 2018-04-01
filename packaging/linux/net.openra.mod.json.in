@@ -1,0 +1,112 @@
+{
+  "app-id": "net.openra.{MODINSTALLERNAME}",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "1.6",
+  "sdk": "org.freedesktop.Sdk",
+  "command": "openra-{MODID}",
+  "sdk-extensions": ["org.freedesktop.Sdk.Extension.mono5"],
+  "finish-args": [
+    "--filesystem=host:ro",
+    "--filesystem=~/.openra",
+    "--socket=x11",
+    "--share=ipc",
+    "--socket=pulseaudio",
+    "--device=dri",
+    "--share=network"
+  ],
+  "build-options" : {
+    "append-path": "/usr/lib/sdk/mono5/bin",
+    "append-ld-library-path": "/usr/lib/sdk/mono5/lib",
+    "env": {
+      "PKG_CONFIG_PATH": "/app/lib/pkgconfig:/app/share/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:/usr/lib/sdk/mono5/lib/pkgconfig"
+    },
+    "build-args": [
+      "--share=network"
+    ]
+  },
+  "modules": [
+    {
+      "name": "libgdiplus",
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://download.mono-project.com/sources/libgdiplus/libgdiplus0-4.2.tar.gz",
+          "sha256": "f332b9b8b44fd1c50b8d8d01a7296360b806c790b8297614739b3de1edbadfeb"
+        }
+      ],
+      "cleanup": [ "/include", "/lib/*.a", "/lib/*.la", "/lib/pkgconfig", "/share/man" ]
+    },
+    {
+      "name": "lua51",
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://www.lua.org/ftp/lua-5.1.5.tar.gz",
+          "sha256": "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333"
+        },
+        {
+          "type": "patch",
+          "path": "lua51-cflags.patch"
+        },
+        {
+          "type": "patch",
+          "path": "lua51-prefix.patch"
+        },
+        {
+          "type": "patch",
+          "path": "lua51-so.patch"
+        },
+        {
+          "type": "shell",
+          "commands": [
+            "sed -e 's:llua:llua5.1:' -e 's:/include:/include/lua5.1:' -i etc/lua.pc",
+            "sed -r -e '/^LUA_(SO|A|T)=/ s/lua/lua5.1/' -e '/^LUAC_T=/ s/luac/luac5.1/' -i src/Makefile",
+            "mv doc/lua.1 doc/lua5.1.1",
+            "mv doc/luac.1 doc/luac5.1.1"
+          ]
+        }
+      ],
+      "cleanup": [ "/bin", "/include", "/lib/*.a", "/lib/*.la", "/lib/pkgconfig", "/share/man" ],
+      "buildsystem": "simple",
+      "build-commands": [
+        "make CFLAGS='-O2 -Wall -fPIC' linux",
+        "make TO_BIN='lua5.1 luac5.1' TO_LIB='liblua5.1.a liblua5.1.so liblua5.1.so.5.1 liblua5.1.so.5.1.5' INSTALL_TOP='/app' INSTALL_INC='/app/include/lua5.1' TO_MAN='lua5.1.1 luac5.1.1' INSTALL_MAN='/app/share/man/man1' install",
+        "install -Dm0644 etc/lua.pc /app/lib/pkgconfig/lua51.pc",
+        "ln -s liblua5.1.so /app/lib/liblua.so.5.1",
+        "ln -s liblua5.1.so /app/lib/liblua.so.5.1.5"
+      ]
+    },
+    {
+      "name": "OpenRA",
+      "sources": [
+        {
+          "type": "archive",
+          "path": "build.tar"
+        }
+      ],
+      "buildsystem": "simple",
+      "build-commands": [
+        "cp -r * /app"
+      ]
+    },
+    {
+      "name": "mono-runtime",
+      "buildsystem": "simple",
+      "build-commands": [
+        "/usr/lib/sdk/mono5/install.sh",
+        "cp /usr/lib/sdk/mono5/lib/libmono-btls-shared.so /app/lib/",
+        "cp /usr/lib/sdk/mono5/lib/mono/4.5/cert-sync.exe /app/lib/mono/4.5/",
+        "cp /usr/lib/sdk/mono5/bin/cert-sync /app/bin/",
+        "sed -i 's,/usr/lib/sdk/mono5/,/app/,g' /app/bin/cert-sync",
+        "cp -ar /usr/lib/sdk/mono5/lib/mono/gac/System.Drawing /app/lib/mono/gac/",
+        "rm -f /app/lib/mono/gac/System.Drawing/*/*.pdb",
+        "cp -ar /usr/lib/sdk/mono5/lib/mono/gac/System.Numerics /app/lib/mono/gac/",
+        "rm -f /app/lib/mono/gac/System.Numerics/*/*.pdb"
+      ],
+      "build-options" : {
+        "no-debuginfo": true,
+        "strip": true
+      }
+    }
+  ]
+}
