@@ -1,0 +1,14 @@
+ZSU-23:
+	ReloadDelay: 6
+Repair:
+	Warhead@1Dam: SpreadDamage
+		Damage: -2500
+		ValidTargets: Repair
+^SubMissileDefault:
+	ReloadDelay: 250
+	Warhead@1Dam: SpreadDamage
+		Versus:
+			Wood: 80
+TorpTube:
+	Projectile: Missile
+		Speed: 100

@@ -1,0 +1,83 @@
+World:
+	MissionData:
+		Briefing: Smitty's Spring 2018 Playtest B. See forums or resource center for changlog.
+SPEN:
+	DetectCloaked:
+		CloakTypes: Underwater
+		Range: 10c0
+	RenderDetectionCircle:
+SYRD:
+	DetectCloaked:
+		CloakTypes: Underwater
+		Range: 10c0
+	RenderDetectionCircle:
+^Wall:
+	Building:
+		RequiresBaseProvider: True
+JEEP:
+	Cargo:
+		MaxWeight: 2
+		PipCount: 2
+HELI:
+	Aircraft:
+		TurnSpeed: 5
+^Husk:
+	TransformOnCapture:
+		ForceHealthPercentage: 40
+BIO:
+	RevealsShroud:
+		Range: 4c0
+AFLD:
+	RevealsShroud:
+		Range: 5c0
+ATEK:
+	RevealsShroud:
+		Range: 5c0
+APWR:
+	RevealsShroud:
+		Range: 5c0
+MSUB:
+	RevealsShroud:
+		Range: 8c0
+SAM:
+	RevealsShroud:
+		Range: 8c0
+HIJACKER:
+	Selectable:
+		Priority: 5
+MNLY:
+	Selectable:
+		Priority: 6
+ARTY:
+	Valued:
+		Cost: 850
+SHOK:
+	Valued:
+		Cost: 350
+TTNK:
+	Mobile:
+		Speed: 99
+MGG:
+	Buildable:
+		Prerequisites: atek, ~vehicles.england, ~techlevel.high
+CTNK:
+	PortableChrono:
+		ChargeDelay: 250
+STNK:
+	Cloak:
+		InitialDelay: 125
+	Buildable:
+		Prerequisites: atek, ~vehicles.france, ~techlevel.high
+Player:
+	ClassicProductionQueue@Defense:
+		SpeedUp: False
+^Building:
+	GivesBuildableArea:
+		AreaTypes: building, fake
+^FakeBuilding:
+	GivesBuildableArea:
+		AreaTypes: fake
+	RequiresBuildableArea:
+		AreaTypes: fake
+^GlobalBounty:
+	-GivesBounty:
