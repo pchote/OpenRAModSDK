@@ -14,7 +14,7 @@ require_variables() {
 		[ -z "${check}" ] && missing="${missing}   ${i}\n"
 	done
 	if [ ! -z "${missing}" ]; then
-		echo "Required mod.config variables are missing:\n${missing}Repair your mod.config (or user.config) and try again."
+		printf "Required mod.config variables are missing:\n${missing}Repair your mod.config (or user.config) and try again.\n"
 		exit 1
 	fi
 }
@@ -78,14 +78,11 @@ fi
 pushd "${ENGINE_DIRECTORY}" > /dev/null
 make clean
 
-# linux-dependencies target will trigger the lua detection script, which we don't want during packaging
-make cli-dependencies
-sed "s/@LIBLUA51@/liblua5.1.so.0/" thirdparty/Eluant.dll.config.in > Eluant.dll.config
-
-make core
+make core TARGETPLATFORM=linux-x64
 make version VERSION="${ENGINE_VERSION}"
 make install-engine prefix="usr" DESTDIR="${BUILTDIR}/"
 make install-common-mod-files prefix="usr" DESTDIR="${BUILTDIR}/"
+make install-dependencies TARGETPLATFORM=linux-x64 prefix="usr" DESTDIR="${BUILTDIR}/"
 
 for f in ${PACKAGING_COPY_ENGINE_FILES}; do
   mkdir -p "${BUILTDIR}/usr/lib/openra/$(dirname "${f}")"
@@ -97,6 +94,11 @@ popd > /dev/null
 echo "Building mod files"
 make core
 cp -Lr mods/* "${BUILTDIR}/usr/lib/openra/mods"
+
+for f in ${PACKAGING_COPY_MOD_BINARIES}; do
+	mkdir -p "${BUILTDIR}/$(dirname "${f}")"
+	cp "${ENGINE_DIRECTORY}/bin/${f}" "${BUILTDIR}/usr/lib/openra/${f}"
+done
 
 popd > /dev/null
 
@@ -117,27 +119,34 @@ echo "Building AppImage"
 
 install -d "${BUILTDIR}/usr/bin"
 install -d "${BUILTDIR}/etc/mono/4.5"
-install -d "${BUILTDIR}/usr/lib/mono/4.5"
+install -d "${BUILTDIR}/usr/lib/mono/4.5/Facades"
 
 install -Dm 0755 usr/bin/mono "${BUILTDIR}/usr/bin/"
 
 install -Dm 0644 /etc/mono/config "${BUILTDIR}/etc/mono/"
 install -Dm 0644 /etc/mono/4.5/machine.config "${BUILTDIR}/etc/mono/4.5"
 
+for f in $(ls usr/lib/mono/4.5/Facades/*.dll); do install -Dm 0644 "$f" "${BUILTDIR}/usr/lib/mono/4.5/Facades/"; done
 for f in $(ls usr/lib/mono/4.5/*.dll usr/lib/mono/4.5/*.exe); do install -Dm 0644 "$f" "${BUILTDIR}/usr/lib/mono/4.5/"; done
-for f in $(ls usr/lib/*.so usr/lib/*.so.*); do install -Dm 0755 "$f" "${BUILTDIR}/usr/lib/"; done
+for f in $(ls usr/lib/*.so); do install -Dm 0755 "$f" "${BUILTDIR}/usr/lib/"; done
 
-rm -rf libs libs.tar.bz2
+rm -rf libs "${PACKAGING_APPIMAGE_DEPENDENCIES_SOURCE}"
 
 # Add launcher and icons
 sed "s/{MODID}/${MOD_ID}/g" include/AppRun.in | sed "s/{MODNAME}/${PACKAGING_DISPLAY_NAME}/g" > AppRun.temp
 install -m 0755 AppRun.temp "${BUILTDIR}/AppRun"
 
-sed "s/{MODID}/${MOD_ID}/g" include/mod.desktop.in | sed "s/{MODNAME}/${PACKAGING_DISPLAY_NAME}/g" | sed "s/{TAG}/${TAG}/g" > temp.desktop
+
+if [ -n "${PACKAGING_DISCORD_APPID}" ]; then
+	sed "s/{MODID}/${MOD_ID}/g" include/mod.desktop.discord.in | sed "s/{MODNAME}/${PACKAGING_DISPLAY_NAME}/g" | sed "s/{TAG}/${TAG}/g" | sed "s/{DISCORDAPPID}/${PACKAGING_DISCORD_APPID}/g" > temp.desktop
+	sed "s/{MODID}/${MOD_ID}/g" include/mod-mimeinfo.xml.discord.in | sed "s/{TAG}/${TAG}/g" | sed "s/{DISCORDAPPID}/${PACKAGING_DISCORD_APPID}/g" > temp.xml
+else
+	sed "s/{MODID}/${MOD_ID}/g" include/mod.desktop.in | sed "s/{MODNAME}/${PACKAGING_DISPLAY_NAME}/g" | sed "s/{TAG}/${TAG}/g" > temp.desktop
+	sed "s/{MODID}/${MOD_ID}/g" include/mod-mimeinfo.xml.in | sed "s/{TAG}/${TAG}/g" > temp.xml
+fi
+
 install -Dm 0755 temp.desktop "${BUILTDIR}/usr/share/applications/openra-${MOD_ID}.desktop"
 install -m 0755 temp.desktop "${BUILTDIR}/openra-${MOD_ID}.desktop"
-
-sed "s/{MODID}/${MOD_ID}/g" include/mod-mimeinfo.xml.in | sed "s/{TAG}/${TAG}/g" > temp.xml
 install -Dm 0755 temp.xml "${BUILTDIR}/usr/share/mime/packages/openra-${MOD_ID}.xml"
 
 if [ -f "${PACKAGING_DIR}/mod_scalable.svg" ]; then

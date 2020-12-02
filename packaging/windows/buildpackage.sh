@@ -11,7 +11,7 @@ require_variables() {
 		[ -z "${check}" ] && missing="${missing}   ${i}\n"
 	done
 	if [ ! -z "${missing}" ]; then
-		echo "Required mod.config variables are missing:\n${missing}Repair your mod.config (or user.config) and try again."
+		printf "Required mod.config variables are missing:\n${missing}Repair your mod.config (or user.config) and try again.\n"
 		exit 1
 	fi
 }
@@ -49,8 +49,6 @@ BUILTDIR="${PACKAGING_DIR}/build"
 # Set the working dir to the location of this script
 cd "${PACKAGING_DIR}"
 
-LAUNCHER_LIBS="-r:System.dll -r:System.Drawing.dll -r:System.Windows.Forms.dll -r:${BUILTDIR}/OpenRA.Game.exe"
-
 pushd ${TEMPLATE_ROOT} > /dev/null
 
 if [ ! -f "${ENGINE_DIRECTORY}/Makefile" ]; then
@@ -76,27 +74,30 @@ popd > /dev/null
 
 function build_platform()
 {
-	if [ "$1" = "x86" ]; then
-		IS_WIN32="WIN32=true"
+	PLATFORM="${1}"
+	if [ "${PLATFORM}" = "x86" ]; then
 		USE_PROGRAMFILES32="-DUSE_PROGRAMFILES32=true"
 	else
-		IS_WIN32="WIN32=false"
 		USE_PROGRAMFILES32=""
+	fi
+
+	if [ -n "${PACKAGING_DISCORD_APPID}" ]; then
+		USE_DISCORDID="-DUSE_DISCORDID=${PACKAGING_DISCORD_APPID}"
+	else
+		USE_DISCORDID=""
 	fi
 
 	pushd ${TEMPLATE_ROOT} > /dev/null
 
-	echo "Building core files ($1)"
+	echo "Building core files (${PLATFORM})"
 	pushd ${ENGINE_DIRECTORY} > /dev/null
 
-	SRC_DIR="$(pwd)"
-
 	make clean
-	make windows-dependencies "${IS_WIN32}"
-	make core "${IS_WIN32}"
+	make core TARGETPLATFORM="win-${PLATFORM}"
 	make version VERSION="${ENGINE_VERSION}"
-	make install-engine gameinstalldir="" DESTDIR="${BUILTDIR}"
+	make install-engine TARGETPLATFORM="win-${PLATFORM}" gameinstalldir="" DESTDIR="${BUILTDIR}"
 	make install-common-mod-files gameinstalldir="" DESTDIR="${BUILTDIR}"
+	make install-dependencies TARGETPLATFORM="win-${PLATFORM}" gameinstalldir="" DESTDIR="${BUILTDIR}"
 
 	for f in ${PACKAGING_COPY_ENGINE_FILES}; do
 		mkdir -p "${BUILTDIR}/$(dirname "${f}")"
@@ -105,40 +106,47 @@ function build_platform()
 
 	popd > /dev/null
 
-	echo "Building mod files ($1)"
+	echo "Building mod files (${PLATFORM})"
 	make core
 
 	cp -Lr mods/* "${BUILTDIR}/mods"
+
+	for f in ${PACKAGING_COPY_MOD_BINARIES}; do
+		mkdir -p "${BUILTDIR}/$(dirname "${f}")"
+		cp "${ENGINE_DIRECTORY}/bin/${f}" "${BUILTDIR}/${f}"
+	done
 
 	popd > /dev/null
 
 	# Create multi-resolution icon
 	convert "${ARTWORK_DIR}/icon_16x16.png" "${ARTWORK_DIR}/icon_24x24.png" "${ARTWORK_DIR}/icon_32x32.png" "${ARTWORK_DIR}/icon_48x48.png" "${ARTWORK_DIR}/icon_256x256.png" "${BUILTDIR}/${MOD_ID}.ico"
-	cp "${SRC_DIR}/OpenRA.Game.exe.config" "${BUILTDIR}"
 
-	# We need to set the loadFromRemoteSources flag for the launcher, but only for the "portable" zip package.
-	# Windows automatically un-trusts executables that are extracted from a downloaded zip file
-	cp "${SRC_DIR}/OpenRA.Game.exe.config" "${BUILTDIR}/${PACKAGING_WINDOWS_LAUNCHER_NAME}.exe.config"
+	echo "Compiling Windows launcher (${PLATFORM})"
+	msbuild -t:Build "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/OpenRA.WindowsLauncher/OpenRA.WindowsLauncher.csproj" -restore -p:Configuration=Release -p:TargetPlatform="win-${PLATFORM}" -p:LauncherName="${PACKAGING_WINDOWS_LAUNCHER_NAME}" -p:LauncherIcon="${BUILTDIR}/${MOD_ID}.ico" -p:ModID="${MOD_ID}" -p:DisplayName="${PACKAGING_DISPLAY_NAME}" -p:FaqUrl="${PACKAGING_FAQ_URL}"
+	cp "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/bin/${PACKAGING_WINDOWS_LAUNCHER_NAME}.exe" "${BUILTDIR}"
+	cp "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/bin/${PACKAGING_WINDOWS_LAUNCHER_NAME}.exe.config" "${BUILTDIR}"
 
- 	echo "Compiling Windows launcher ($1)"
-	sed "s|DISPLAY_NAME|${PACKAGING_DISPLAY_NAME}|" "${SRC_DIR}/packaging/windows/WindowsLauncher.cs.in" | sed "s|MOD_ID|${MOD_ID}|" | sed "s|FAQ_URL|${PACKAGING_FAQ_URL}|" > "${BUILTDIR}/WindowsLauncher.cs"
-	csc "${BUILTDIR}/WindowsLauncher.cs" -nologo -warn:4 -warnaserror -platform:"$1" -out:"${BUILTDIR}/${PACKAGING_WINDOWS_LAUNCHER_NAME}.exe" -t:winexe ${LAUNCHER_LIBS} -win32icon:"${BUILTDIR}/${MOD_ID}.ico"
-	rm "${BUILTDIR}/WindowsLauncher.cs"
-	mono "${SRC_DIR}/OpenRA.PostProcess.exe" "${BUILTDIR}/${PACKAGING_WINDOWS_LAUNCHER_NAME}.exe" -LAA > /dev/null
+	# Enable the full 4GB address space for the 32 bit game executable
+	# The server and utility do not use enough memory to need this
+	if [ "${PLATFORM}" = "x86" ]; then
+		python3 "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/packaging/windows/MakeLAA.py" "${BUILTDIR}/${PACKAGING_WINDOWS_LAUNCHER_NAME}.exe"
+	fi
 
- 	echo "Building Windows setup.exe ($1)"
+	# Remove redundant generic launcher
+	rm "${BUILTDIR}/OpenRA.exe"
+
+	echo "Building Windows setup.exe (${PLATFORM})"
 	pushd "${PACKAGING_DIR}" > /dev/null
-	makensis -V2 -DSRCDIR="${BUILTDIR}" -DDEPSDIR="${SRC_DIR}/thirdparty/download/windows" -DTAG="${TAG}" -DMOD_ID="${MOD_ID}" -DPACKAGING_WINDOWS_INSTALL_DIR_NAME="${PACKAGING_WINDOWS_INSTALL_DIR_NAME}" -DPACKAGING_WINDOWS_LAUNCHER_NAME="${PACKAGING_WINDOWS_LAUNCHER_NAME}" -DPACKAGING_DISPLAY_NAME="${PACKAGING_DISPLAY_NAME}" -DPACKAGING_WEBSITE_URL="${PACKAGING_WEBSITE_URL}" -DPACKAGING_AUTHORS="${PACKAGING_AUTHORS}" -DPACKAGING_WINDOWS_REGISTRY_KEY="${PACKAGING_WINDOWS_REGISTRY_KEY}" -DPACKAGING_WINDOWS_LICENSE_FILE="${TEMPLATE_ROOT}/${PACKAGING_WINDOWS_LICENSE_FILE}" ${USE_PROGRAMFILES32} buildpackage.nsi
+	makensis -V2 -DSRCDIR="${BUILTDIR}" -DTAG="${TAG}" -DMOD_ID="${MOD_ID}" -DPACKAGING_WINDOWS_INSTALL_DIR_NAME="${PACKAGING_WINDOWS_INSTALL_DIR_NAME}" -DPACKAGING_WINDOWS_LAUNCHER_NAME="${PACKAGING_WINDOWS_LAUNCHER_NAME}" -DPACKAGING_DISPLAY_NAME="${PACKAGING_DISPLAY_NAME}" -DPACKAGING_WEBSITE_URL="${PACKAGING_WEBSITE_URL}" -DPACKAGING_AUTHORS="${PACKAGING_AUTHORS}" -DPACKAGING_WINDOWS_REGISTRY_KEY="${PACKAGING_WINDOWS_REGISTRY_KEY}" -DPACKAGING_WINDOWS_LICENSE_FILE="${TEMPLATE_ROOT}/${PACKAGING_WINDOWS_LICENSE_FILE}" ${USE_PROGRAMFILES32} ${USE_DISCORDID} buildpackage.nsi
 	if [ $? -eq 0 ]; then
-		mv OpenRA.Setup.exe "${OUTPUTDIR}/${PACKAGING_INSTALLER_NAME}-${TAG}-${1}.exe"
+		mv OpenRA.Setup.exe "${OUTPUTDIR}/${PACKAGING_INSTALLER_NAME}-${TAG}-${PLATFORM}.exe"
 	fi
 	popd > /dev/null
 
-	echo "Packaging zip archive ($1)"
+	echo "Packaging zip archive (${PLATFORM})"
 	pushd "${BUILTDIR}" > /dev/null
-	find "${SRC_DIR}/thirdparty/download/windows/" -name '*.dll' -exec cp '{}' '.' ';'
-	zip "${PACKAGING_INSTALLER_NAME}-${TAG}-${1}-winportable.zip" -r -9 * --quiet
-	mv "${PACKAGING_INSTALLER_NAME}-${TAG}-${1}-winportable.zip" "${OUTPUTDIR}"
+	zip "${PACKAGING_INSTALLER_NAME}-${TAG}-${PLATFORM}-winportable.zip" -r -9 * --quiet
+	mv "${PACKAGING_INSTALLER_NAME}-${TAG}-${PLATFORM}-winportable.zip" "${OUTPUTDIR}"
 	popd > /dev/null
 
 	# Cleanup
