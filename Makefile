@@ -20,7 +20,7 @@
 #   make check-sdk-scripts
 #   make check-packaging-scripts
 
-.PHONY: check-sdk-scripts check-packaging-scripts check-variables engine utility core all clean version check-scripts check test
+.PHONY: check-sdk-scripts check-packaging-scripts check-variables engine all clean version check-scripts check test
 .DEFAULT_GOAL := all
 
 PYTHON = $(shell command -v python3 2> /dev/null)
@@ -140,9 +140,7 @@ endif
 	@printf "The engine has been cleaned.\n"
 
 version: check-variables
-	@awk '{sub("Version:.*$$","Version: $(VERSION)"); print $0}' $(MANIFEST_PATH) > $(MANIFEST_PATH).tmp && \
-	awk '{sub("/[^/]*: User$$", "/$(VERSION): User"); print $0}' $(MANIFEST_PATH).tmp > $(MANIFEST_PATH) && \
-	rm $(MANIFEST_PATH).tmp
+	@sh -c '. $(ENGINE_DIRECTORY)/packaging/functions.sh; set_mod_version $(VERSION) $(MANIFEST_PATH)'
 	@printf "Version changed to $(VERSION).\n"
 
 check-scripts: check-variables
@@ -158,7 +156,7 @@ endif
 check: engine
 ifneq ("$(MOD_SOLUTION_FILES)","")
 	@echo "Compiling in debug mode..."
-	@$(MSBUILD) -t:build -p:Configuration=Debug
+	@$(MSBUILD) -t:build -restore -p:Configuration=Debug
 endif
 	@echo "Checking runtime assemblies..."
 	@./utility.sh --check-runtime-assemblies $(WHITELISTED_OPENRA_ASSEMBLIES) $(WHITELISTED_THIRDPARTY_ASSEMBLIES) $(WHITELISTED_CORE_ASSEMBLIES) $(WHITELISTED_MOD_ASSEMBLIES)
@@ -167,6 +165,6 @@ endif
 	@echo "Checking for incorrect conditional trait interface overrides..."
 	@./utility.sh --check-conditional-trait-interface-overrides
 
-test: utility
+test: engine
 	@echo "Testing $(MOD_ID) mod MiniYAML..."
 	@./utility.sh --check-yaml

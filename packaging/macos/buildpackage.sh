@@ -1,8 +1,9 @@
 #!/bin/bash
 # OpenRA Mod SDK packaging script for macOS
 #
-# The application bundles will be signed if the following environment variable is defined:
-#   MACOS_DEVELOPER_IDENTITY: Certificate name, of the form `Developer\ ID\ Application:\ <name with escaped spaces>`
+# The application bundles will be signed if the following environment variables are defined:
+#   MACOS_DEVELOPER_IDENTITY: The alphanumeric identifier listed in the certificate name ("Developer ID Application: <your name> (<identity>)")
+#                             or as Team ID in your Apple Developer account Membership Details.
 # If the identity is not already in the default keychain, specify the following environment variables to import it:
 #   MACOS_DEVELOPER_CERTIFICATE_BASE64: base64 content of the exported .p12 developer ID certificate.
 #                                       Generate using `base64 certificate.p12 | pbcopy`
@@ -28,14 +29,14 @@ require_variables() {
 		eval check="\$$i"
 		[ -z "${check}" ] && missing="${missing}   ${i}\n"
 	done
-	if [ ! -z "${missing}" ]; then
-		printf "Required mod.config variables are missing:\n${missing}Repair your mod.config (or user.config) and try again.\n"
+	if [ -n "${missing}" ]; then
+		printf "Required mod.config variables are missing:\n%sRepair your mod.config (or user.config) and try again.\n" "${missing}"
 		exit 1
 	fi
 }
 
 if [ $# -eq "0" ]; then
-	echo "Usage: `basename $0` version [outputdir]"
+	echo "Usage: $(basename "$0") version [outputdir]"
 	exit 1
 fi
 
@@ -51,16 +52,18 @@ if [ -f "${TEMPLATE_ROOT}/user.config" ]; then
 	. "${TEMPLATE_ROOT}/user.config"
 fi
 
-require_variables "MOD_ID" "ENGINE_DIRECTORY" "PACKAGING_DISPLAY_NAME" "PACKAGING_INSTALLER_NAME" \
+require_variables "MOD_ID" "ENGINE_DIRECTORY" "PACKAGING_DISPLAY_NAME" "PACKAGING_INSTALLER_NAME" "PACKAGING_COPY_CNC_DLL" "PACKAGING_COPY_D2K_DLL" \
 	"PACKAGING_OSX_MONO_TAG" "PACKAGING_OSX_MONO_SOURCE" "PACKAGING_OSX_MONO_TEMP_ARCHIVE_NAME" \
 	"PACKAGING_OSX_DMG_MOD_ICON_POSITION" "PACKAGING_OSX_DMG_APPLICATION_ICON_POSITION" "PACKAGING_OSX_DMG_HIDDEN_ICON_POSITION" \
 	"PACKAGING_FAQ_URL" "PACKAGING_OVERWRITE_MOD_VERSION"
 
-if [ ! -f "${ENGINE_DIRECTORY}/Makefile" ]; then
+if [ ! -f "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/Makefile" ]; then
 	echo "Required engine files not found."
 	echo "Run \`make\` in the mod directory to fetch and build the required files, then try again.";
 	exit 1
 fi
+
+. "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/packaging/functions.sh"
 
 # Import code signing certificate
 if [ -n "${MACOS_DEVELOPER_CERTIFICATE_BASE64}" ] && [ -n "${MACOS_DEVELOPER_CERTIFICATE_PASSWORD}" ] && [ -n "${MACOS_DEVELOPER_IDENTITY}" ]; then
@@ -99,80 +102,74 @@ modify_plist() {
 build_platform() {
 	PLATFORM="${1}"
 	DMG_NAME="${2}"
+	LAUNCHER_DIR="${BUILTDIR}/${PACKAGING_OSX_APP_NAME}"
+	LAUNCHER_CONTENTS_DIR="${LAUNCHER_DIR}/Contents"
+	LAUNCHER_MACOS_DIR="${LAUNCHER_CONTENTS_DIR}/MacOS"
+	LAUNCHER_RESOURCES_DIR="${LAUNCHER_CONTENTS_DIR}/Resources"
+
 	echo "Building launcher (${PLATFORM})"
 
-	mkdir -p "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Resources"
-	mkdir -p "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/MacOS"
-	echo "APPL????" > "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/PkgInfo"
-	cp "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/packaging/macos/Eluant.dll.config" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Resources"
-	cp "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/packaging/macos/Info.plist.in" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Info.plist"
+	mkdir -p "${LAUNCHER_RESOURCES_DIR}"
+	mkdir -p "${LAUNCHER_CONTENTS_DIR}/MacOS"
+	echo "APPL????" > "${LAUNCHER_CONTENTS_DIR}/PkgInfo"
+	cp "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/packaging/macos/Info.plist.in" "${LAUNCHER_CONTENTS_DIR}/Info.plist"
 
-	modify_plist "{DEV_VERSION}" "${TAG}" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Info.plist"
-	modify_plist "{FAQ_URL}" "${PACKAGING_FAQ_URL}" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Info.plist"
-	modify_plist "{MOD_ID}" "${MOD_ID}" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Info.plist"
-	modify_plist "{MOD_NAME}" "${PACKAGING_DISPLAY_NAME}" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Info.plist"
-	modify_plist "{JOIN_SERVER_URL_SCHEME}" "openra-${MOD_ID}-${TAG}" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Info.plist"
+	modify_plist "{DEV_VERSION}" "${TAG}" "${LAUNCHER_CONTENTS_DIR}/Info.plist"
+	modify_plist "{FAQ_URL}" "${PACKAGING_FAQ_URL}" "${LAUNCHER_CONTENTS_DIR}/Info.plist"
+	modify_plist "{MOD_ID}" "${MOD_ID}" "${LAUNCHER_CONTENTS_DIR}/Info.plist"
+	modify_plist "{MOD_NAME}" "${PACKAGING_DISPLAY_NAME}" "${LAUNCHER_CONTENTS_DIR}/Info.plist"
+	modify_plist "{JOIN_SERVER_URL_SCHEME}" "openra-${MOD_ID}-${TAG}" "${LAUNCHER_CONTENTS_DIR}/Info.plist"
 
 	if [ -n "${DISCORD_APPID}" ]; then
-		modify_plist "{DISCORD_URL_SCHEME}" "discord-${DISCORD_APPID}" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Info.plist"
+		modify_plist "{DISCORD_URL_SCHEME}" "discord-${DISCORD_APPID}" "${LAUNCHER_CONTENTS_DIR}/Info.plist"
 	else
-		modify_plist "<string>{DISCORD_URL_SCHEME}</string>" "" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Info.plist"
+		modify_plist "<string>{DISCORD_URL_SCHEME}</string>" "" "${LAUNCHER_CONTENTS_DIR}/Info.plist"
 	fi
 
 	if [ "${PLATFORM}" = "compat" ]; then
-		modify_plist "{MINIMUM_SYSTEM_VERSION}" "10.9" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Info.plist"
-		clang -m64 "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/packaging/macos/launcher-mono.m" -o "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/MacOS/OpenRA" -framework AppKit -mmacosx-version-min=10.9
+		modify_plist "{MINIMUM_SYSTEM_VERSION}" "10.9" "${LAUNCHER_CONTENTS_DIR}/Info.plist"
+		clang -m64 "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/packaging/macos/launcher-mono.m" -o "${LAUNCHER_MACOS_DIR}/OpenRA" -framework AppKit -mmacosx-version-min=10.9
 	else
-		modify_plist "{MINIMUM_SYSTEM_VERSION}" "10.13" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Info.plist"
-		clang -m64 "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/packaging/macos/launcher.m" -o "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/MacOS/OpenRA" -framework AppKit -mmacosx-version-min=10.13
+		modify_plist "{MINIMUM_SYSTEM_VERSION}" "10.13" "${LAUNCHER_CONTENTS_DIR}/Info.plist"
+		clang -m64 "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/packaging/macos/launcher.m" -o "${LAUNCHER_MACOS_DIR}/OpenRA" -framework AppKit -mmacosx-version-min=10.13
 
 		curl -s -L -o "${PACKAGING_OSX_MONO_TEMP_ARCHIVE_NAME}" -O "${PACKAGING_OSX_MONO_SOURCE}" || exit 3
 		unzip -qq -d "${BUILTDIR}" "${PACKAGING_OSX_MONO_TEMP_ARCHIVE_NAME}"
 		rm "${PACKAGING_OSX_MONO_TEMP_ARCHIVE_NAME}"
 
-		mv "${BUILTDIR}/mono" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/MacOS/"
-		mv "${BUILTDIR}/etc" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Resources"
-		mv "${BUILTDIR}/lib" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Resources"
+		mv "${BUILTDIR}/mono" "${LAUNCHER_MACOS_DIR}"
+		mv "${BUILTDIR}/etc" "${LAUNCHER_RESOURCES_DIR}"
+		mv "${BUILTDIR}/lib" "${LAUNCHER_RESOURCES_DIR}"
 	fi
 
-	pushd "${TEMPLATE_ROOT}" > /dev/null
-
-	MOD_VERSION=$(grep 'Version:' mods/${MOD_ID}/mod.yaml | awk '{print $2}')
-
-	if [ "${PACKAGING_OVERWRITE_MOD_VERSION}" == "True" ]; then
-		make version VERSION="${TAG}"
-	else
-		echo "Mod version ${MOD_VERSION} will remain unchanged.";
-	fi
-
-	pushd "${ENGINE_DIRECTORY}" > /dev/null
 	echo "Building core files"
-
-	make clean
-	make core TARGETPLATFORM=osx-x64
-	make version VERSION="${ENGINE_VERSION}"
-	make install-engine gameinstalldir="/Contents/Resources/" DESTDIR="${BUILTDIR}/${PACKAGING_OSX_APP_NAME}"
-	make install-common-mod-files gameinstalldir="/Contents/Resources/" DESTDIR="${BUILTDIR}/${PACKAGING_OSX_APP_NAME}"
-	make install-dependencies TARGETPLATFORM=osx-x64 gameinstalldir="/Contents/Resources/"  DESTDIR="${BUILTDIR}/${PACKAGING_OSX_APP_NAME}"
+	install_assemblies_mono "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}" "${LAUNCHER_RESOURCES_DIR}" "osx-x64" "True" "${PACKAGING_COPY_CNC_DLL}" "${PACKAGING_COPY_D2K_DLL}"
+	install_data "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}" "${LAUNCHER_RESOURCES_DIR}"
 
 	for f in ${PACKAGING_COPY_ENGINE_FILES}; do
-		mkdir -p "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Resources/$(dirname "${f}")"
-		cp -r "${f}" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Resources/${f}"
+		mkdir -p "${LAUNCHER_RESOURCES_DIR}/$(dirname "${f}")"
+		cp -r "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/${f}" "${LAUNCHER_RESOURCES_DIR}/${f}"
 	done
-
-	popd > /dev/null
 
 	echo "Building mod files"
-	make core
-	cp -LR mods/* "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Resources/mods"
-
-	for f in ${PACKAGING_COPY_MOD_BINARIES}; do
-		mkdir -p "${BUILTDIR}/$(dirname "${f}")"
-		cp "${ENGINE_DIRECTORY}/bin/${f}" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Resources/${f}"
-	done
-
+	pushd "${TEMPLATE_ROOT}" > /dev/null
+	make all
 	popd > /dev/null
 
+	cp -LR "${TEMPLATE_ROOT}mods/"* "${LAUNCHER_RESOURCES_DIR}/mods"
+
+	for f in ${PACKAGING_COPY_MOD_BINARIES}; do
+		mkdir -p "${LAUNCHER_RESOURCES_DIR}/$(dirname "${f}")"
+		cp "${TEMPLATE_ROOT}/${ENGINE_DIRECTORY}/bin/${f}" "${LAUNCHER_RESOURCES_DIR}/${f}"
+	done
+
+	set_engine_version "${ENGINE_VERSION}" "${LAUNCHER_RESOURCES_DIR}"
+	if [ "${PACKAGING_OVERWRITE_MOD_VERSION}" == "True" ]; then
+		set_mod_version "${TAG}" "${LAUNCHER_RESOURCES_DIR}/mods/${MOD_ID}/mod.yaml"
+	else
+		MOD_VERSION=$(grep 'Version:' "${LAUNCHER_RESOURCES_DIR}/mods/${MOD_ID}/mod.yaml" | awk '{print $2}')
+		echo "Mod version ${MOD_VERSION} will remain unchanged.";
+	fi
 
 	# Assemble multi-resolution icon
 	mkdir "${BUILTDIR}/mod.iconset"
@@ -184,13 +181,13 @@ build_platform() {
 	cp "${ARTWORK_DIR}/icon_256x256.png" "${BUILTDIR}/mod.iconset/icon_128x128@2x.png"
 	cp "${ARTWORK_DIR}/icon_256x256.png" "${BUILTDIR}/mod.iconset/icon_256x256.png"
 	cp "${ARTWORK_DIR}/icon_512x512.png" "${BUILTDIR}/mod.iconset/icon_256x256@2x.png"
-	iconutil --convert icns "${BUILTDIR}/mod.iconset" -o "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Resources/${MOD_ID}.icns"
+	iconutil --convert icns "${BUILTDIR}/mod.iconset" -o "${LAUNCHER_RESOURCES_DIR}/${MOD_ID}.icns"
 	rm -rf "${BUILTDIR}/mod.iconset"
 
 	# Sign binaries with developer certificate
 	if [ -n "${MACOS_DEVELOPER_IDENTITY}" ]; then
-		codesign -s "${MACOS_DEVELOPER_IDENTITY}" --timestamp --options runtime -f --entitlements "${PACKAGING_DIR}/entitlements.plist" "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Resources/"*.dylib
-		codesign -s "${MACOS_DEVELOPER_IDENTITY}" --timestamp --options runtime -f --entitlements "${PACKAGING_DIR}/entitlements.plist" --deep "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}"
+		codesign -s "${MACOS_DEVELOPER_IDENTITY}" --timestamp --options runtime -f --entitlements "${PACKAGING_DIR}/entitlements.plist" "${LAUNCHER_RESOURCES_DIR}/"*.dylib
+		codesign -s "${MACOS_DEVELOPER_IDENTITY}" --timestamp --options runtime -f --entitlements "${PACKAGING_DIR}/entitlements.plist" --deep "${LAUNCHER_DIR}"
 	fi
 
 	echo "Packaging disk image"
@@ -202,7 +199,7 @@ build_platform() {
 	mkdir "/Volumes/${PACKAGING_DISPLAY_NAME}/.background/"
 	tiffutil -cathidpicheck "${ARTWORK_DIR}/macos-background.png" "${ARTWORK_DIR}/macos-background-2x.png" -out "/Volumes/${PACKAGING_DISPLAY_NAME}/.background/background.tiff"
 
-	cp "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Resources/${MOD_ID}.icns" "/Volumes/${PACKAGING_DISPLAY_NAME}/.VolumeIcon.icns"
+	cp "${LAUNCHER_DIR}/Contents/Resources/${MOD_ID}.icns" "/Volumes/${PACKAGING_DISPLAY_NAME}/.VolumeIcon.icns"
 
 	echo '
 	   tell application "Finder"
@@ -230,7 +227,7 @@ build_platform() {
 	' | osascript
 
 	# HACK: Copy the volume icon again - something in the previous step seems to delete it...?
-	cp "${BUILTDIR}/${PACKAGING_OSX_APP_NAME}/Contents/Resources/${MOD_ID}.icns" "/Volumes/${PACKAGING_DISPLAY_NAME}/.VolumeIcon.icns"
+	cp "${LAUNCHER_DIR}/Contents/Resources/${MOD_ID}.icns" "/Volumes/${PACKAGING_DISPLAY_NAME}/.VolumeIcon.icns"
 	SetFile -c icnC "/Volumes/${PACKAGING_DISPLAY_NAME}/.VolumeIcon.icns"
 	SetFile -a C "/Volumes/${PACKAGING_DISPLAY_NAME}"
 
@@ -245,7 +242,7 @@ build_platform() {
 notarize_package() {
 	DMG_PATH="${1}"
 	NOTARIZE_DMG_PATH="${DMG_PATH%.*}"-notarization.dmg
-	echo "Submitting ${PACKAGE_NAME} for notarization"
+	echo "Submitting ${DMG_PATH} for notarization"
 
 	# Reset xcode search path to fix xcrun not finding altool
 	sudo xcode-select -r
